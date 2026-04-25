@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Benchmark outputs
+results/
+*.csv
+
+# uv
+.python-version
+
+# Temporary scripts
+test_offline.py
+debug_endpoint.py
+validate.py

@@ -1,0 +1,23 @@
+[project]
+name = "heavy-prefill-bench"
+version = "0.1.0"
+description = "Benchmarking suite for prefill-heavy LLM inference workloads"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9.0",
+    "numpy>=1.26.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+vllm = ["vllm>=0.7.0"]
+sglang = ["sglang>=0.4.0", "sgl-kernel"]
+all = ["vllm>=0.7.0", "sglang>=0.4.0", "sgl-kernel"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/heavy_prefill_bench"]
