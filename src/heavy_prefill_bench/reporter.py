@@ -47,3 +47,44 @@ def write_sweep_csv(path: str, rows: List[Dict[str, Any]], gpu_hourly_cost_usd: 
 def write_metadata(path: str, metadata: Dict[str, Any]) -> None:
     with open(path, "w") as f:
         json.dump(metadata, f, indent=2)
+
+
+def warn_if_mixed_pricing_metadata(output_dir: str) -> None:
+    """Warn if metadata in an output directory has mixed pricing provenance."""
+    if not os.path.isdir(output_dir):
+        return
+
+    signatures: Dict[str, List[str]] = {}
+    for name in os.listdir(output_dir):
+        if not name.endswith("_metadata.json"):
+            continue
+
+        path = os.path.join(output_dir, name)
+        try:
+            with open(path) as f:
+                meta = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        pricing = meta.get("pricing", {})
+        signature = json.dumps(
+            {
+                "provider_name": pricing.get("provider_name"),
+                "instance_type": pricing.get("instance_type"),
+                "region": pricing.get("region"),
+                "gpu_hourly_cost_usd": pricing.get("gpu_hourly_cost_usd"),
+                "pricing_source_note": pricing.get("pricing_source_note"),
+                "pricing_timestamp_utc": pricing.get("pricing_timestamp_utc"),
+            },
+            sort_keys=True,
+        )
+        signatures.setdefault(signature, []).append(name)
+
+    if len(signatures) <= 1:
+        return
+
+    print("\n[WARNING] Mixed pricing metadata detected across run metadata files.")
+    print("Comparing or merging CSVs with different pricing provenance can make tokens_per_dollar misleading.")
+    for idx, (signature, names) in enumerate(signatures.items(), start=1):
+        print(f"  Set {idx}: {', '.join(sorted(names))}")
+        print(f"    pricing={signature}")
