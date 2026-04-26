@@ -1,8 +1,13 @@
 """SGLang topology auto-tuner entry point."""
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from heavy_prefill_bench.optimizer import AutoTuner
-from heavy_prefill_bench.reporter import write_sweep_csv, write_metadata
+from heavy_prefill_bench.reporter import (
+    write_sweep_csv,
+    write_metadata,
+    warn_if_mixed_pricing_metadata,
+)
 
 
 async def run_autotune(config: Dict[str, Any]) -> None:
@@ -33,6 +38,13 @@ async def run_autotune(config: Dict[str, Any]) -> None:
 
     if "gpu_hourly_cost_usd" not in config["hardware"]:
         raise ValueError("hardware.gpu_hourly_cost_usd is required")
+    try:
+        gpu_hourly_cost_usd = float(config["hardware"]["gpu_hourly_cost_usd"])
+    except (TypeError, ValueError):
+        raise ValueError("hardware.gpu_hourly_cost_usd must be numeric")
+    if gpu_hourly_cost_usd <= 0:
+        raise ValueError("hardware.gpu_hourly_cost_usd must be > 0")
+    config["hardware"]["gpu_hourly_cost_usd"] = gpu_hourly_cost_usd
 
     tuner = AutoTuner(config)
     results = tuner.run()
@@ -53,5 +65,20 @@ async def run_autotune(config: Dict[str, Any]) -> None:
                 "gpu_label": tuner.gpu_label,
                 "gpu_hourly_cost_usd": tuner.gpu_hourly_cost_usd,
             },
+            "pricing": {
+                "provider_name": config["hardware"].get("provider_name", "unknown"),
+                "instance_type": config["hardware"].get("instance_type", "unknown"),
+                "region": config["hardware"].get("region", "unknown"),
+                "gpu_hourly_cost_usd": tuner.gpu_hourly_cost_usd,
+                "pricing_timestamp_utc": config["hardware"].get(
+                    "pricing_timestamp_utc",
+                    datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                ),
+                "pricing_source_note": config["hardware"].get(
+                    "pricing_source_note",
+                    "unspecified",
+                ),
+            },
         }
         write_metadata(f"{output_dir}/sglang_autotune_metadata.json", meta)
+        warn_if_mixed_pricing_metadata(output_dir)

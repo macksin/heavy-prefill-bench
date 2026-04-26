@@ -54,6 +54,11 @@ sglang_args:
 
 hardware:
   gpu_hourly_cost_usd: 0.34
+  provider_name: runpod
+  instance_type: 1x RTX 4090
+  region: us-ca
+  pricing_timestamp_utc: "2026-04-26T00:00:00+00:00"
+  pricing_source_note: "RunPod on-demand listed price"
 
 output_dir: results
 ```
@@ -65,6 +70,11 @@ The optimizer runs `python -m sglang.bench_offline_throughput` for each `chunked
 | `random_range_ratio` | `0.0` = all prompts exactly `input_len`. `1.0` = uniform 0–2× input_len. Use `0.0` for deterministic batch jobs. |
 | `quantization` | `null` = bf16 on Ampere/Ada+ GPUs, fp16 on older ones. Other options: `fp8`, `awq`, `gptq`. Only applied if non-null. |
 | `gpu_hourly_cost_usd` | **Required.** Used to compute `tokens_per_dollar`. |
+| `provider_name` | Provider label persisted in metadata pricing provenance. |
+| `instance_type` | Instance SKU/type persisted in metadata pricing provenance. |
+| `region` | Region persisted in metadata pricing provenance. |
+| `pricing_timestamp_utc` | Optional pricing snapshot timestamp; defaults to current UTC time. |
+| `pricing_source_note` | Optional note (pricing page/source) for auditability. |
 
 ## Running
 
@@ -86,7 +96,21 @@ total_tokens_per_sec, requests_per_hour, successful_requests,
 total_output_tokens, model, tp, gpu_hourly_cost_usd, tokens_per_dollar
 ```
 
-Plus `results/sglang_autotune_metadata.json` with run configuration, and per-config JSONL files at `results/sglang_chunk{size}.jsonl`.
+Plus `results/sglang_autotune_metadata.json` with run configuration and explicit pricing provenance (`provider_name`, `instance_type`, `region`, `pricing_timestamp_utc`, `pricing_source_note`), and per-config JSONL files at `results/sglang_chunk{size}.jsonl`.
+
+After each run, the tool warns if the output directory contains metadata files with mixed pricing provenance. Treat that warning as a blocker for direct tokens-per-dollar comparisons.
+
+## CSV comparison rules (important)
+
+When merging or comparing benchmark CSVs, only compare `tokens_per_dollar` when all of the following match:
+
+1. `provider_name`
+2. `instance_type`
+3. `region`
+4. `gpu_hourly_cost_usd`
+5. `pricing_source_note` and `pricing_timestamp_utc` (same pricing snapshot/provenance)
+
+If any differ, do **not** rank by `tokens_per_dollar` across those rows. You may still compare raw throughput (`requests_per_sec`, `total_tokens_per_sec`) for model/topology behavior.
 
 ## Metrics
 
