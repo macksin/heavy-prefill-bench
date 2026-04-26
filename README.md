@@ -12,16 +12,13 @@ heavy-prefill-bench/
 ├── src/heavy_prefill_bench/
 │   ├── optimizer.py                   # Auto-tuner: subprocess driver + JSONL parser
 │   ├── runner.py                      # Config validation and glue
-│   ├── reporter.py                    # CSV writer for sweep results
-│   ├── metrics.py                     # Throughput metrics
-│   ├── harness.py                     # (legacy vLLM path — unused)
-│   ├── generator.py                   # (legacy — unused)
-│   ├── monitor.py                     # (legacy — unused)
-│   └── adapters/                      # (legacy — unused)
+│   └── reporter.py                    # CSV writer for sweep results
 └── results/                           # Output CSVs, JSONL, metadata
 ```
 
 The auto-tuner uses SGLang's built-in `bench_offline_throughput` which runs the Engine in-process with no HTTP overhead — the correct tool for pure throughput measurement.
+
+GPU name is **auto-detected** via `nvidia-smi` and embedded in every output row so cross-machine comparisons are never mislabeled.
 
 ## Setup
 
@@ -31,9 +28,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install dependencies (SGLang)
 uv pip install -e ".[sglang]"
-
-# Optional: install libnuma for sgl-kernel on some systems
-apt-get install -y libnuma1
 ```
 
 ## Configuration
@@ -44,23 +38,33 @@ Edit `config.yaml`:
 model: microsoft/Phi-4-mini-instruct
 
 workload:
-  input_len: 2000
+  input_len: 4000
   output_len: 1000
-  num_prompts: 200
+  num_prompts: 50
 
 sweep:
-  chunked_prefill_sizes: [2048, 4096, 8192]
+  chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768]
 
 sglang_args:
   tp: 1
   mem_fraction_static: 0.85
   disable_radix_cache: true
-  random_range_ratio: 1.0
+  random_range_ratio: 0.0
+  quantization: null
+
+hardware:
+  gpu_hourly_cost_usd: 0.34
 
 output_dir: results
 ```
 
 The optimizer runs `python -m sglang.bench_offline_throughput` for each `chunked_prefill_size` in the sweep list, parses the JSONL output, and picks the best.
+
+| Field | Meaning |
+|---|---|
+| `random_range_ratio` | `0.0` = all prompts exactly `input_len`. `1.0` = uniform 0–2× input_len. Use `0.0` for deterministic batch jobs. |
+| `quantization` | `null` = fp16/bf16. Other options: `fp8`, `awq`, `gptq`. Only applied if non-null. |
+| `gpu_hourly_cost_usd` | **Required.** Used to compute `tokens_per_dollar`. |
 
 ## Running
 
@@ -69,17 +73,17 @@ source .venv/bin/activate
 python run_benchmark.py config.yaml
 ```
 
-Each sweep config takes ~4 minutes on RTX 4090 (model load ~45s, benchmark ~165s for 200×2k/1k).
+Each sweep config takes ~2–3 minutes on RTX 4090 (model load ~45s, benchmark ~100s for 50×4k/1k). A 5-config sweep finishes in ~12–15 minutes.
 
 ## Output
 
 One CSV at `results/sglang_autotune.csv` with sweep-level schema:
 
 ```
-framework, chunked_prefill_size, num_prompts, input_len, output_len,
+framework, gpu, quantization, chunked_prefill_size, num_prompts, input_len, output_len,
 requests_per_sec, input_tokens_per_sec, output_tokens_per_sec,
 total_tokens_per_sec, requests_per_hour, successful_requests,
-total_output_tokens, model, tp
+total_output_tokens, model, tp, gpu_hourly_cost_usd, tokens_per_dollar
 ```
 
 Plus `results/sglang_autotune_metadata.json` with run configuration, and per-config JSONL files at `results/sglang_chunk{size}.jsonl`.
@@ -92,13 +96,32 @@ Plus `results/sglang_autotune_metadata.json` with run configuration, and per-con
 | Input token throughput | `input_tokens/sec` — prefill throughput |
 | Output token throughput | `output_tokens/sec` — decode throughput |
 | Total token throughput | `total_tokens/sec` — input + output |
+| Tokens per dollar | `total_tokens/sec × 3600 / gpu_hourly_cost_usd` — cost-normalized throughput for GPU selection |
 
 ## Example Results
 
-RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 2k input × 1k output × 200 prompts:
+RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 4k input × 1k output × 50 prompts, $0.34/hr:
 
-| chunked_prefill_size | req/sec | req/hr | tokens/sec |
-|---|---|---|---|
-| 2048 | 1.21 | 4,349 | 3,624 |
-| 4096 | 1.21 | 4,359 | 3,632 |
-| **8192** | **1.22** | **4,380** | **3,650** |
+| chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
+|---|---|---|---|---|
+| 2048 | 2.00 | 7,211 | 5,098 | 53,977,412 |
+| 4096 | 2.01 | 7,241 | 5,120 | 54,211,765 |
+| 8192 | 2.01 | 7,241 | 5,120 | 54,211,765 |
+
+## Troubleshooting
+
+### `ImportError: libnuma.so.1: cannot open shared object file`
+
+SGLang's `sgl_kernel` requires `libnuma1`. If you see this error when the benchmark subprocess starts:
+
+```
+ImportError: libnuma.so.1: cannot open shared object file: No such file or directory
+```
+
+Install it with:
+
+```bash
+apt-get update && apt-get install -y libnuma1
+```
+
+Then re-run the benchmark.

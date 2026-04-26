@@ -4,17 +4,21 @@
 model: microsoft/Phi-4-mini-instruct
 
 workload:
-  input_len: 2000
+  input_len: 4000
   output_len: 1000
-  num_prompts: 200
+  num_prompts: 50
 
 sweep:
-  chunked_prefill_sizes: [2048, 4096, 8192]
+  chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768]
 
 sglang_args:
   tp: 1
   mem_fraction_static: 0.85
   disable_radix_cache: true
-  random_range_ratio: 1.0
+  random_range_ratio: 0.0
+  quantization: null
+
+hardware:
+  gpu_hourly_cost_usd: 0.7
 
 output_dir: results

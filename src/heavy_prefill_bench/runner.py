@@ -9,7 +9,7 @@ async def run_autotune(config: Dict[str, Any]) -> None:
     """Run the SGLang bench_offline_throughput sweep to find best topology."""
 
     # Validate required keys
-    required = ["model", "workload", "sweep"]
+    required = ["model", "workload", "sweep", "hardware"]
     for key in required:
         if key not in config:
             raise ValueError(f"Missing required config key: {key}")
@@ -22,13 +22,16 @@ async def run_autotune(config: Dict[str, Any]) -> None:
     if "chunked_prefill_sizes" not in config["sweep"]:
         raise ValueError("sweep must contain 'chunked_prefill_sizes' list")
 
+    if "gpu_hourly_cost_usd" not in config["hardware"]:
+        raise ValueError("hardware.gpu_hourly_cost_usd is required")
+
     tuner = AutoTuner(config)
     results = tuner.run()
 
     if results:
         output_dir = config.get("output_dir", "results")
         csv_path = f"{output_dir}/sglang_autotune.csv"
-        write_sweep_csv(csv_path, results)
+        write_sweep_csv(csv_path, results, tuner.gpu_hourly_cost_usd)
         print(f"\nResults written to {csv_path}")
 
         meta = {
@@ -37,5 +40,9 @@ async def run_autotune(config: Dict[str, Any]) -> None:
             "workload": wl,
             "sweep": config["sweep"],
             "sglang_args": config.get("sglang_args", {}),
+            "hardware": {
+                "gpu_label": tuner.gpu_label,
+                "gpu_hourly_cost_usd": tuner.gpu_hourly_cost_usd,
+            },
         }
         write_metadata(f"{output_dir}/sglang_autotune_metadata.json", meta)

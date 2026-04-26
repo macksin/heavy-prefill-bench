@@ -228,3 +228,4 @@ results/
 test_offline.py
 debug_endpoint.py
 validate.py
+uv.lock
