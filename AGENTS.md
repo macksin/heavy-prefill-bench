@@ -62,4 +62,41 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ---
 
+## RunPod H100-Specific Troubleshooting
+
+These issues were encountered during the H100 benchmark session (Apr 2026) and should save the next agent 30–60 minutes.
+
+### `OSError: [Errno 122] Disk quota exceeded` during model download
+
+**Root cause:** RunPod network storage (`/workspace`) has a ~50 GB practical write limit per operation, even though `df -h` shows 252 TB. Large model downloads (14B+ with 30+ GB of safetensors shards) hit this limit and fail with `Disk quota exceeded`.
+
+**Fix:**
+- Delete previous model caches before downloading the next one to stay under the quota:
+  ```bash
+  rm -rf /workspace/huggingface_cache/hub/models--<previous-model>
+  ```
+- For the largest model, use `/dev/shm` (RAM-backed tmpfs, 117 GB on this instance) as the HuggingFace cache:
+  ```bash
+  mkdir -p /dev/shm/huggingface_cache
+  HF_HOME=/dev/shm/huggingface_cache python run_benchmark.py config.yaml
+  ```
+
+### `hf_xet` / xet storage download failures
+
+**Symptom:** `RuntimeError: Data processing error: File reconstruction error` or `Internal Writer Error: Background writer channel closed` during `snapshot_download`.
+
+**Fix:** Uninstall the xet backend. SGLang falls back to regular HTTP downloads, which are slower but stable:
+```bash
+uv pip uninstall hf-xet
+```
+
+### `ImportError: libnuma.so.1` / `FileNotFoundError: ninja`
+
+Standard SGLang dependencies; install them before the first run:
+```bash
+apt-get update && apt-get install -y libnuma1 ninja-build
+```
+
+---
+
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
