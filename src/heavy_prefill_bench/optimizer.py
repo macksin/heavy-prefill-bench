@@ -178,7 +178,7 @@ class AutoTuner:
                 "tp": self.tp,
                 "framework": self.framework,
                 "gpu": self.gpu_label,
-                "quantization": self.quantization or "",
+                "quantization": self.quantization or "bf16",
             }
             results.append(result)
 

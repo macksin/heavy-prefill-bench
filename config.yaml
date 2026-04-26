@@ -1,7 +1,7 @@
 # SGLang bench_offline_throughput auto-tune configuration
 # The optimizer sweeps chunked_prefill_size and picks the max-throughput config.
 
-model: microsoft/Phi-4-mini-instruct
+model: Qwen/Qwen2.5-7B-Instruct
 
 workload:
   input_len: 4000

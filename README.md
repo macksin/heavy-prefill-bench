@@ -63,7 +63,7 @@ The optimizer runs `python -m sglang.bench_offline_throughput` for each `chunked
 | Field | Meaning |
 |---|---|
 | `random_range_ratio` | `0.0` = all prompts exactly `input_len`. `1.0` = uniform 0–2× input_len. Use `0.0` for deterministic batch jobs. |
-| `quantization` | `null` = fp16/bf16. Other options: `fp8`, `awq`, `gptq`. Only applied if non-null. |
+| `quantization` | `null` = bf16 on Ampere/Ada+ GPUs, fp16 on older ones. Other options: `fp8`, `awq`, `gptq`. Only applied if non-null. |
 | `gpu_hourly_cost_usd` | **Required.** Used to compute `tokens_per_dollar`. |
 
 ## Running
@@ -100,7 +100,19 @@ Plus `results/sglang_autotune_metadata.json` with run configuration, and per-con
 
 ## Example Results
 
-RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 4k input × 1k output × 50 prompts, $0.34/hr:
+RTX 4090 (24 GB), Qwen2.5-7B-Instruct, bf16, workload 4k input × 1k output × 50 prompts, $0.70/hr:
+
+| chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
+|---|---|---|---|---|
+| 2048 | 1.63 | 5,851 | 4,137 | 21,274,240 |
+| 4096 | 1.63 | 5,881 | 4,158 | 21,385,047 |
+| 8192 | 1.64 | 5,892 | 4,166 | 21,426,423 |
+| 16384 | — | — | — | OOM |
+| 32768 | — | — | — | OOM |
+
+> **Note:** Larger `chunked_prefill_size` values OOM on 24 GB because they process more tokens simultaneously during prefill. The sweet spot is the largest size that fits.
+
+Older result — RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 4k input × 1k output × 50 prompts, $0.34/hr:
 
 | chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
 |---|---|---|---|---|
@@ -125,3 +137,20 @@ apt-get update && apt-get install -y libnuma1
 ```
 
 Then re-run the benchmark.
+
+### `FileNotFoundError: [Errno 2] No such file or directory: 'ninja'`
+
+SGLang's FlashInfer backend JIT-compiles CUDA kernels during graph capture and requires `ninja-build`:
+
+```bash
+apt-get update && apt-get install -y ninja-build
+```
+
+### Disk quota exceeded during model download
+
+The HuggingFace cache defaults to `~/.cache/huggingface`, which may be on a small root partition. Move it to a larger mount (e.g. `/workspace` on RunPod) and symlink back:
+
+```bash
+mv ~/.cache/huggingface /workspace/huggingface_cache
+ln -s /workspace/huggingface_cache ~/.cache/huggingface
+```
