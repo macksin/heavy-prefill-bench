@@ -46,18 +46,8 @@ class Harness:
         self.concurrency = concurrency
         self.gpu_monitor = gpu_monitor
 
-    async def run(
-        self,
-        prompts: List[List[int]],
-        output_len: int = 2000,
-        ignore_eos: bool = True,
-    ) -> BenchmarkResult:
-        semaphore = asyncio.Semaphore(self.concurrency)
-
-        if self.gpu_monitor:
-            self.gpu_monitor.start()
-
-        # Warmup: 1 short request to trigger torch.compile + CUDA graph capture
+    async def _warmup(self) -> None:
+        """Run a single short request to trigger torch.compile + CUDA graph capture."""
         warmup_prompt = generate_request_tokens(100, seed=999999)
         print("[Harness] Running warmup (1×100 tokens)...")
         t_warmup = time.perf_counter()
@@ -71,8 +61,24 @@ class Harness:
         except Exception as exc:
             print(f"[Harness] Warmup failed: {exc}", file=sys.stderr)
         warmup_sec = time.perf_counter() - t_warmup
-        print(f"[Harness] Warmup complete ({warmup_sec:.1f}s). Starting benchmark...")
+        print(f"[Harness] Warmup complete ({warmup_sec:.1f}s).")
 
+    async def run(
+        self,
+        prompts: List[List[int]],
+        output_len: int = 2000,
+        ignore_eos: bool = True,
+        skip_warmup: bool = False,
+    ) -> BenchmarkResult:
+        semaphore = asyncio.Semaphore(self.concurrency)
+
+        if not skip_warmup:
+            await self._warmup()
+
+        if self.gpu_monitor:
+            self.gpu_monitor.start()
+
+        print(f"[Harness] Starting benchmark (concurrency={self.concurrency})...")
         wall_start = time.perf_counter()
 
         async def _send_one(idx: int, prompt: List[int]) -> RequestResult:
@@ -131,3 +137,38 @@ class Harness:
             framework=self.adapter.name,
             concurrency=self.concurrency,
         )
+
+    async def run_concurrency_ladder(
+        self,
+        prompts: List[List[int]],
+        concurrencies: List[int],
+        output_len: int = 2000,
+        ignore_eos: bool = True,
+    ) -> List[BenchmarkResult]:
+        """Run the same prompts at multiple concurrency levels.
+
+        The adapter is started once and reused. Warmup runs once before the ladder.
+        Each concurrency step gets its own GPU monitor sample window.
+        Errors in individual concurrency steps are caught and result in a failed
+        BenchmarkResult, allowing the ladder to continue.
+        """
+        await self._warmup()
+
+        results: List[BenchmarkResult] = []
+        for c in concurrencies:
+            self.concurrency = c
+            if self.gpu_monitor is None:
+                self.gpu_monitor = GPUMonitor(interval_sec=1.0, device_id=0)
+            try:
+                result = await self.run(
+                    prompts, output_len=output_len, ignore_eos=ignore_eos, skip_warmup=True
+                )
+            except Exception as exc:
+                result = BenchmarkResult(
+                    framework=self.adapter.name,
+                    concurrency=c,
+                    wall_time_sec=0.0,
+                )
+                print(f"[Harness] Concurrency={c} failed: {exc}", file=sys.stderr)
+            results.append(result)
+        return results

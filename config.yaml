@@ -1,28 +1,20 @@
-# Default benchmark configuration for Phase 1 Validation
-# Hardware: 1x RTX 4090 (24 GB VRAM)
-# Model: microsoft/Phi-4-mini-instruct (~7.67 GB weights)
+# SGLang bench_offline_throughput auto-tune configuration
+# The optimizer sweeps chunked_prefill_size and picks the max-throughput config.
 
 model: microsoft/Phi-4-mini-instruct
 
-# Context window — must be >= input_len + output_len
-# Phi-4-mini supports 131072, but we cap at 52000 to preserve VRAM for batch size
-max_model_len: 52000
+workload:
+  input_len: 2000
+  output_len: 1000
+  num_prompts: 200
 
-# Token dimensions
-input_len: 50000
-output_len: 2000
-num_requests: 100
+sweep:
+  chunked_prefill_sizes: [2048, 4096, 8192]
 
-# Sweep parameters (Phase 1 — reduced for single RTX 4090)
-# VRAM budget: ~6.4 GiB per 52k-token sequence → max ~2 concurrent at full length
-chunk_sizes: [4096, 8192]
-max_seqs: [4, 8, 16]
-concurrencies: [1, 2, 4, 8, 16]
+sglang_args:
+  tp: 1
+  mem_fraction_static: 0.85
+  disable_radix_cache: true
+  random_range_ratio: 1.0
 
-# Output
 output_dir: results
-
-# Frameworks to benchmark (list)
-frameworks:
-  - vllm
-  # - sglang  # Uncomment after Step 7 (vLLM validation passes)
