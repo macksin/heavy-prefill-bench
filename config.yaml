@@ -9,6 +9,8 @@ workload:
   num_prompts: 50
 
 sweep:
+  # Optional outer sweep; if set, workload.num_prompts must be omitted.
+  # num_prompts: [25, 50, 100]
   chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768]
 
 sglang_args:

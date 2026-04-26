@@ -95,7 +95,7 @@ class AutoTuner:
         wl = config["workload"]
         self.input_len = wl["input_len"]
         self.output_len = wl["output_len"]
-        self.num_prompts = wl["num_prompts"]
+        self.num_prompts_values = list(config["sweep"].get("num_prompts", [wl.get("num_prompts")]))
 
         sweep = config["sweep"]
         self.chunk_sizes = list(sweep["chunked_prefill_sizes"])
@@ -118,73 +118,79 @@ class AutoTuner:
 
         print(f"[AutoTuner] Model: {self.model}")
         print(f"[AutoTuner] Workload: input={self.input_len}, output={self.output_len}, "
-              f"prompts={self.num_prompts}")
+              f"prompts={self.num_prompts_values}")
         print(f"[AutoTuner] Sweep: chunked_prefill_size={self.chunk_sizes}")
         print(f"[AutoTuner] TP={self.tp}, mem_fraction_static={self.mem_fraction_static}")
         print(f"[AutoTuner] GPU: {self.gpu_label}")
 
         results: List[Dict[str, Any]] = []
+        total_runs = len(self.num_prompts_values) * len(self.chunk_sizes)
+        run_idx = 0
+        for num_prompts in self.num_prompts_values:
+            for chunk_size in self.chunk_sizes:
+                run_idx += 1
+                output_file = os.path.join(
+                    self.output_dir, f"sglang_p{num_prompts}_chunk{chunk_size}.jsonl"
+                )
+                cmd = _build_command(
+                    model=self.model,
+                    input_len=self.input_len,
+                    output_len=self.output_len,
+                    num_prompts=num_prompts,
+                    chunk_size=chunk_size,
+                    output_file=output_file,
+                    tp=self.tp,
+                    mem_fraction_static=self.mem_fraction_static,
+                    random_range_ratio=self.random_range_ratio,
+                    quantization=self.quantization,
+                )
+                if self.extra_args:
+                    cmd.extend(self.extra_args)
 
-        for i, chunk_size in enumerate(self.chunk_sizes):
-            output_file = os.path.join(
-                self.output_dir, f"sglang_chunk{chunk_size}.jsonl"
-            )
-            cmd = _build_command(
-                model=self.model,
-                input_len=self.input_len,
-                output_len=self.output_len,
-                num_prompts=self.num_prompts,
-                chunk_size=chunk_size,
-                output_file=output_file,
-                tp=self.tp,
-                mem_fraction_static=self.mem_fraction_static,
-                random_range_ratio=self.random_range_ratio,
-                quantization=self.quantization,
-            )
-            if self.extra_args:
-                cmd.extend(self.extra_args)
+                print(
+                    f"\n[{run_idx}/{total_runs}] num_prompts={num_prompts}, "
+                    f"chunked_prefill_size={chunk_size}"
+                )
+                print(f"  {' '.join(cmd)}")
+                sys.stdout.flush()
 
-            print(f"\n[{i + 1}/{len(self.chunk_sizes)}] chunked_prefill_size={chunk_size}")
-            print(f"  {' '.join(cmd)}")
-            sys.stdout.flush()
+                try:
+                    subprocess.run(cmd, check=True, timeout=7200)
+                except subprocess.CalledProcessError as exc:
+                    print(f"  FAILED (exit={exc.returncode}) — likely OOM or config error")
+                    continue
+                except subprocess.TimeoutExpired:
+                    print(f"  TIMEOUT — exceeded 2h")
+                    continue
 
-            try:
-                subprocess.run(cmd, check=True, timeout=7200)
-            except subprocess.CalledProcessError as exc:
-                print(f"  FAILED (exit={exc.returncode}) — likely OOM or config error")
-                continue
-            except subprocess.TimeoutExpired:
-                print(f"  TIMEOUT — exceeded 2h")
-                continue
+                parsed = _parse_jsonl(output_file)
+                if parsed is None:
+                    print(f"  No throughput data in output file")
+                    continue
 
-            parsed = _parse_jsonl(output_file)
-            if parsed is None:
-                print(f"  No throughput data in output file")
-                continue
+                result = {
+                    "chunked_prefill_size": chunk_size,
+                    "num_prompts": num_prompts,
+                    "input_len": self.input_len,
+                    "output_len": self.output_len,
+                    "requests_per_sec": parsed.get("request_throughput", 0),
+                    "input_tokens_per_sec": parsed.get("input_throughput", 0),
+                    "output_tokens_per_sec": parsed.get("output_throughput", 0),
+                    "total_tokens_per_sec": parsed.get("total_throughput", 0),
+                    "requests_per_hour": parsed.get("request_throughput", 0) * 3600,
+                    "successful_requests": parsed.get("successful_requests", 0),
+                    "total_output_tokens": parsed.get("total_output_tokens", 0),
+                    "model": self.model,
+                    "tp": self.tp,
+                    "framework": self.framework,
+                    "gpu": self.gpu_label,
+                    "quantization": self.quantization or "bf16",
+                }
+                results.append(result)
 
-            result = {
-                "chunked_prefill_size": chunk_size,
-                "num_prompts": self.num_prompts,
-                "input_len": self.input_len,
-                "output_len": self.output_len,
-                "requests_per_sec": parsed.get("request_throughput", 0),
-                "input_tokens_per_sec": parsed.get("input_throughput", 0),
-                "output_tokens_per_sec": parsed.get("output_throughput", 0),
-                "total_tokens_per_sec": parsed.get("total_throughput", 0),
-                "requests_per_hour": parsed.get("request_throughput", 0) * 3600,
-                "successful_requests": parsed.get("successful_requests", 0),
-                "total_output_tokens": parsed.get("total_output_tokens", 0),
-                "model": self.model,
-                "tp": self.tp,
-                "framework": self.framework,
-                "gpu": self.gpu_label,
-                "quantization": self.quantization or "bf16",
-            }
-            results.append(result)
-
-            print(f"  requests/sec: {result['requests_per_sec']:.3f}  "
-                  f"tokens/sec: {result['total_tokens_per_sec']:.0f}  "
-                  f"→ {result['requests_per_hour']:.0f} req/hr")
+                print(f"  requests/sec: {result['requests_per_sec']:.3f}  "
+                      f"tokens/sec: {result['total_tokens_per_sec']:.0f}  "
+                      f"→ {result['requests_per_hour']:.0f} req/hr")
 
         if results:
             best = max(results, key=lambda r: r["requests_per_sec"])

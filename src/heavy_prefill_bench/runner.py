@@ -15,12 +15,21 @@ async def run_autotune(config: Dict[str, Any]) -> None:
             raise ValueError(f"Missing required config key: {key}")
 
     wl = config["workload"]
-    for key in ["input_len", "output_len", "num_prompts"]:
+    for key in ["input_len", "output_len"]:
         if key not in wl:
             raise ValueError(f"Missing required workload key: {key}")
 
-    if "chunked_prefill_sizes" not in config["sweep"]:
+    sweep = config["sweep"]
+    if "chunked_prefill_sizes" not in sweep:
         raise ValueError("sweep must contain 'chunked_prefill_sizes' list")
+    if "num_prompts" in wl and "num_prompts" in sweep:
+        raise ValueError(
+            "Specify only one of workload.num_prompts or sweep.num_prompts"
+        )
+    if "num_prompts" not in wl and "num_prompts" not in sweep:
+        raise ValueError(
+            "Must specify either workload.num_prompts or sweep.num_prompts"
+        )
 
     if "gpu_hourly_cost_usd" not in config["hardware"]:
         raise ValueError("hardware.gpu_hourly_cost_usd is required")
