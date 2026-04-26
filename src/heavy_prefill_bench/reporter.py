@@ -22,6 +22,9 @@ SWEEP_FIELDNAMES = [
     "total_output_tokens",
     "model",
     "tp",
+    "peak_vram_mib",
+    "avg_gpu_util_pct",
+    "avg_mem_util_pct",
     "gpu_hourly_cost_usd",
     "tokens_per_dollar",
 ]

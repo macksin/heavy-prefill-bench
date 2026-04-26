@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from typing import Any, Dict, List
 
 
@@ -109,9 +110,99 @@ class AutoTuner:
 
         self.output_dir = config.get("output_dir", "results")
         self.framework = config.get("framework", "sglang")
+        self.telemetry_cfg = config.get("telemetry", {})
+        self.telemetry_enabled = bool(self.telemetry_cfg.get("enabled", False))
+        self.telemetry_interval_sec = float(self.telemetry_cfg.get("sample_interval_sec", 1.0))
+        self.telemetry_dir = os.path.join(self.output_dir, "telemetry")
 
         self.gpu_label = _detect_gpu()
         self.gpu_hourly_cost_usd = config["hardware"]["gpu_hourly_cost_usd"]
+
+    def _read_telemetry_sample(self) -> Dict[str, float]:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,utilization.gpu,utilization.memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5.0,
+        )
+        mem_used_total = 0.0
+        gpu_utils: List[float] = []
+        mem_utils: List[float] = []
+        for line in result.stdout.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) != 3:
+                continue
+            mem_used_total += float(parts[0])
+            gpu_utils.append(float(parts[1]))
+            mem_utils.append(float(parts[2]))
+        if not gpu_utils:
+            raise RuntimeError("nvidia-smi returned no telemetry rows")
+        return {
+            "memory_used_mib": mem_used_total,
+            "utilization_gpu_pct": sum(gpu_utils) / len(gpu_utils),
+            "utilization_memory_pct": sum(mem_utils) / len(mem_utils),
+        }
+
+    def _run_with_optional_telemetry(
+        self, cmd: List[str], chunk_size: int
+    ) -> Dict[str, Any]:
+        if not self.telemetry_enabled:
+            subprocess.run(cmd, check=True, timeout=7200)
+            return {}
+
+        os.makedirs(self.telemetry_dir, exist_ok=True)
+        proc = subprocess.Popen(cmd)
+        samples: List[Dict[str, float]] = []
+        sampling_error: str | None = None
+        start_time = time.time()
+        while proc.poll() is None:
+            try:
+                sample = self._read_telemetry_sample()
+                sample["t_sec"] = time.time() - start_time
+                samples.append(sample)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError, ValueError, RuntimeError) as exc:
+                sampling_error = str(exc)
+                break
+            time.sleep(self.telemetry_interval_sec)
+
+        if sampling_error:
+            proc.wait(timeout=7200)
+            if proc.returncode != 0:
+                raise subprocess.CalledProcessError(proc.returncode, cmd)
+            print(f"  Telemetry disabled for this run: {sampling_error}")
+            return {}
+
+        proc.wait(timeout=7200)
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+        peak_vram_mib = max(s["memory_used_mib"] for s in samples) if samples else 0.0
+        avg_gpu_util_pct = sum(s["utilization_gpu_pct"] for s in samples) / len(samples) if samples else 0.0
+        avg_mem_util_pct = sum(s["utilization_memory_pct"] for s in samples) / len(samples) if samples else 0.0
+        telemetry_payload = {
+            "chunked_prefill_size": chunk_size,
+            "num_prompts": self.num_prompts,
+            "input_len": self.input_len,
+            "output_len": self.output_len,
+            "samples": samples,
+            "summary": {
+                "peak_vram_mib": peak_vram_mib,
+                "avg_gpu_util_pct": avg_gpu_util_pct,
+                "avg_mem_util_pct": avg_mem_util_pct,
+            },
+        }
+        telemetry_path = os.path.join(
+            self.telemetry_dir,
+            f"prompt{self.num_prompts}_in{self.input_len}_out{self.output_len}_chunk{chunk_size}.json",
+        )
+        with open(telemetry_path, "w") as f:
+            json.dump(telemetry_payload, f, indent=2)
+        return telemetry_payload["summary"]
 
     def run(self) -> List[Dict[str, Any]]:
         os.makedirs(self.output_dir, exist_ok=True)
@@ -149,7 +240,7 @@ class AutoTuner:
             sys.stdout.flush()
 
             try:
-                subprocess.run(cmd, check=True, timeout=7200)
+                telemetry_summary = self._run_with_optional_telemetry(cmd, chunk_size)
             except subprocess.CalledProcessError as exc:
                 print(f"  FAILED (exit={exc.returncode}) — likely OOM or config error")
                 continue
@@ -179,6 +270,9 @@ class AutoTuner:
                 "framework": self.framework,
                 "gpu": self.gpu_label,
                 "quantization": self.quantization or "bf16",
+                "peak_vram_mib": telemetry_summary.get("peak_vram_mib", ""),
+                "avg_gpu_util_pct": telemetry_summary.get("avg_gpu_util_pct", ""),
+                "avg_mem_util_pct": telemetry_summary.get("avg_mem_util_pct", ""),
             }
             results.append(result)
 
