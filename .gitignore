@@ -217,9 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Benchmark outputs
-results/
-*.csv
+# Benchmark outputs (ignore runtime artifacts, keep archived results)
+results/*
+!results/sglang_autotune_Qwen2.5-*.csv
+!results/all_runs.csv
 
 # uv
 .python-version

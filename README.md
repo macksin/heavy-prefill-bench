@@ -120,6 +120,44 @@ Older result — RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 4k input
 | 4096 | 2.01 | 7,241 | 5,120 | 54,211,765 |
 | 8192 | 2.01 | 7,241 | 5,120 | 54,211,765 |
 
+### H100 80GB (RunPod, $2.99/hr)
+
+RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768].
+
+**Qwen2.5-7B-Instruct (bf16)**
+
+| chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
+|---|---|---|---|---|
+| 2048 | 4.87 | 17,549 | 12,408 | 14,939,309 |
+| 4096 | 5.01 | 18,047 | 12,760 | 15,363,581 |
+| 8192 | 5.05 | 18,182 | 12,855 | 15,478,146 |
+| 16384 | 5.04 | 18,138 | 12,825 | 15,440,957 |
+| 32768 | 5.08 | 18,277 | 12,923 | 15,559,130 |
+
+**Qwen2.5-14B-Instruct (bf16)**
+
+| chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
+|---|---|---|---|---|
+| 2048 | 2.44 | 8,786 | 6,212 | 7,479,311 |
+| 4096 | 2.46 | 8,847 | 6,255 | 7,531,468 |
+| 8192 | 2.47 | 8,897 | 6,290 | 7,573,664 |
+| 16384 | 2.47 | 8,875 | 6,275 | 7,555,093 |
+| 32768 | 2.48 | 8,926 | 6,311 | 7,598,311 |
+
+**Qwen2.5-32B-Instruct (fp8)**
+
+| chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
+|---|---|---|---|---|
+| 2048 | 1.83 | 6,594 | 4,662 | 5,613,335 |
+| 4096 | 1.81 | 6,503 | 4,598 | 5,536,168 |
+| 8192 | 1.79 | 6,431 | 4,547 | 5,474,720 |
+| 16384 | 1.74 | 6,260 | 4,426 | 5,329,371 |
+| 32768 | 1.70 | 6,125 | 4,331 | 5,214,092 |
+
+> **Note:** 32B fp8 throughput *decreases* with larger `chunked_prefill_size` on this workload, unlike 7B and 14B where larger chunks improved throughput. The sweet spot varies by model size and quantization.
+
+Raw CSVs: [`results/sglang_autotune_Qwen2.5-7B-bf16.csv`](results/sglang_autotune_Qwen2.5-7B-bf16.csv), [`results/sglang_autotune_Qwen2.5-14B-bf16.csv`](results/sglang_autotune_Qwen2.5-14B-bf16.csv), [`results/sglang_autotune_Qwen2.5-32B-fp8.csv`](results/sglang_autotune_Qwen2.5-32B-fp8.csv), [`results/all_runs.csv`](results/all_runs.csv).
+
 ## Troubleshooting
 
 ### `ImportError: libnuma.so.1: cannot open shared object file`
