@@ -152,7 +152,9 @@ Older result — RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 4k input
 
 RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768].
 
-**Qwen2.5-7B-Instruct (bf16)**
+> **Session note (2026-04-27):** The latest sweep with the new auto-tuner code was interrupted after 19/20 configs for 7B. 14B and 32B were not started. The numbers below are from a prior complete session for reference. See [`SESSION_2026-04-27.md`](SESSION_2026-04-27.md) for details and recovery instructions.
+
+**Qwen2.5-7B-Instruct (bf16)** — *prior complete run*
 
 | chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
 |---|---|---|---|---|
@@ -162,7 +164,7 @@ RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chun
 | 16384 | 5.04 | 18,138 | 12,825 | 15,440,957 |
 | 32768 | 5.08 | 18,277 | 12,923 | 15,559,130 |
 
-**Qwen2.5-14B-Instruct (bf16)**
+**Qwen2.5-14B-Instruct (bf16)** — *prior complete run*
 
 | chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
 |---|---|---|---|---|
@@ -172,7 +174,7 @@ RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chun
 | 16384 | 2.47 | 8,875 | 6,275 | 7,555,093 |
 | 32768 | 2.48 | 8,926 | 6,311 | 7,598,311 |
 
-**Qwen2.5-32B-Instruct (fp8)**
+**Qwen2.5-32B-Instruct (fp8)** — *prior complete run*
 
 | chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
 |---|---|---|---|---|
@@ -184,7 +186,7 @@ RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chun
 
 > **Note:** 32B fp8 throughput *decreases* with larger `chunked_prefill_size` on this workload, unlike 7B and 14B where larger chunks improved throughput. The sweet spot varies by model size and quantization.
 
-Raw CSVs: [`results/sglang_autotune_Qwen2.5-7B-bf16.csv`](results/sglang_autotune_Qwen2.5-7B-bf16.csv), [`results/sglang_autotune_Qwen2.5-14B-bf16.csv`](results/sglang_autotune_Qwen2.5-14B-bf16.csv), [`results/sglang_autotune_Qwen2.5-32B-fp8.csv`](results/sglang_autotune_Qwen2.5-32B-fp8.csv), [`results/all_runs.csv`](results/all_runs.csv).
+Raw CSVs: [`results/sglang_autotune.csv`](results/sglang_autotune.csv) (current, incomplete), [`results/sglang_autotune_metadata.json`](results/sglang_autotune_metadata.json). Prior runs: [`results/sglang_autotune_Qwen2.5-7B-bf16.csv`](results/sglang_autotune_Qwen2.5-7B-bf16.csv), [`results/sglang_autotune_Qwen2.5-14B-bf16.csv`](results/sglang_autotune_Qwen2.5-14B-bf16.csv), [`results/sglang_autotune_Qwen2.5-32B-fp8.csv`](results/sglang_autotune_Qwen2.5-32B-fp8.csv), [`results/all_runs.csv`](results/all_runs.csv).
 
 ## Troubleshooting
 
@@ -219,4 +221,24 @@ The HuggingFace cache defaults to `~/.cache/huggingface`, which may be on a smal
 ```bash
 mv ~/.cache/huggingface /workspace/huggingface_cache
 ln -s /workspace/huggingface_cache ~/.cache/huggingface
+```
+
+### Bash / tool timeout on long sweeps
+
+A full 20-config sweep (4 batch sizes × 5 chunk sizes) can take 45–60 minutes on H100. If the runner kills the process at the 1-hour mark, the Python script may be interrupted before it writes `sglang_autotune.csv` and `sglang_autotune_metadata.json`.
+
+**Fix:**
+- Use a timeout longer than 60 minutes if your runner supports it.
+- Or run one model at a time and back up results between models.
+- If interrupted, existing `results/sglang_p{num_prompts}_chunk{chunk_size}.jsonl` files are still valid. Parse them directly rather than re-running the whole sweep.
+
+### `pip: command not found` inside `.venv`
+
+If the virtual environment was created with `uv`, `pip` is not installed as a standalone binary.
+
+**Fix:** Use `python -m pip` or `uv pip`:
+```bash
+python -m pip uninstall -y hf-xet
+# or
+uv pip uninstall hf-xet
 ```

@@ -21,6 +21,11 @@ sglang_args:
   quantization: null
 
 hardware:
-  gpu_hourly_cost_usd: 0.7
+  gpu_hourly_cost_usd: 2.99
+  provider_name: runpod
+  instance_type: 1x H100 80GB
+  region: us-ca
+  pricing_timestamp_utc: "2026-04-27T00:00:00+00:00"
+  pricing_source_note: "RunPod on-demand listed price"
 
 output_dir: results

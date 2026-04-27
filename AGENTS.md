@@ -97,6 +97,23 @@ Standard SGLang dependencies; install them before the first run:
 apt-get update && apt-get install -y libnuma1 ninja-build
 ```
 
+### `pip: command not found` inside `.venv`
+
+If the venv was created with `uv`, `pip` is not a standalone binary. Use:
+```bash
+python -m pip <command>
+# or
+uv pip <command>
+```
+
+### Bash / tool timeout killing long sweeps
+
+A 20-config sweep takes ~45–60 min on H100. If the runner kills the process at 1h, the script dies before writing CSV/metadata.
+
+**Fix:**
+- Extend timeout if possible.
+- Existing JSONL files are still valid — parse them instead of re-running. See `generate_results.py` for an example.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
