@@ -152,17 +152,34 @@ Older result — RTX 4090 (24 GB), Phi-4-mini-instruct (3.8B), workload 4k input
 
 RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768].
 
-> **Session note (2026-04-27):** The latest sweep with the new auto-tuner code was interrupted after 19/20 configs for 7B. 14B and 32B were not started. The numbers below are from a prior complete session for reference. See [`SESSION_2026-04-27.md`](SESSION_2026-04-27.md) for details and recovery instructions.
+> **Session note (2026-04-27):** The latest sweep with the new auto-tuner code (commit `4b3c622`) completed 19/20 configs for 7B before hitting a 1-hour bash timeout. 14B and 32B were not started. See [`SESSION_2026-04-27.md`](SESSION_2026-04-27.md) for full details and how to finish the run.
 
-**Qwen2.5-7B-Instruct (bf16)** — *prior complete run*
+**Qwen2.5-7B-Instruct (bf16)** — *19/20 configs completed*
 
-| chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
-|---|---|---|---|---|
-| 2048 | 4.87 | 17,549 | 12,408 | 14,939,309 |
-| 4096 | 5.01 | 18,047 | 12,760 | 15,363,581 |
-| 8192 | 5.05 | 18,182 | 12,855 | 15,478,146 |
-| 16384 | 5.04 | 18,138 | 12,825 | 15,440,957 |
-| 32768 | 5.08 | 18,277 | 12,923 | 15,559,130 |
+| num_prompts | chunked_prefill_size | req/sec | req/hr | tokens/sec | tokens/$ |
+|---|---:|---:|---:|---:|---:|
+| 50 | 2048 | 4.85 | 17,476 | 12,356 | 14,876,908 |
+| 50 | 4096 | 5.01 | 18,028 | 12,747 | 15,347,081 |
+| 50 | 8192 | 5.09 | 18,322 | 12,955 | 15,597,870 |
+| 50 | 16384 | 5.05 | 18,170 | 12,847 | 15,467,793 |
+| 50 | 32768 | 5.07 | 18,234 | 12,893 | 15,522,963 |
+| 100 | 2048 | 7.38 | 26,555 | 18,773 | 22,602,851 |
+| 100 | 4096 | 7.41 | 26,671 | 18,855 | 22,702,145 |
+| 100 | 8192 | 7.47 | 26,888 | 19,008 | 22,886,232 |
+| 100 | 16384 | 7.50 | 27,002 | 19,089 | 22,983,993 |
+| 100 | 32768 | 7.53 | 27,102 | 19,160 | 23,068,902 |
+| 200 | 2048 | 9.74 | 35,077 | 24,636 | 29,662,113 |
+| 200 | 4096 | 9.82 | 35,353 | 24,830 | 29,895,737 |
+| 200 | 8192 | 9.95 | 35,812 | 25,152 | 30,283,507 |
+| 200 | 16384 | 10.00 | 35,989 | 25,277 | 30,433,840 |
+| 200 | 32768 | 10.06 | 36,225 | 25,443 | 30,633,138 |
+| 400 | 2048 | 11.02 | 39,672 | 28,056 | 33,779,796 |
+| 400 | 4096 | 11.11 | 39,983 | 28,276 | 34,044,546 |
+| 400 | 8192 | 11.28 | 40,608 | 28,718 | 34,576,808 |
+| 400 | 16384 | 11.32 | 40,769 | 28,832 | 34,714,497 |
+| 400 | 32768 | — | — | — | **missing** |
+
+> **Note:** `p400_chunk32768` timed out and was not recorded. All other 19 configs succeeded with no OOMs.
 
 **Qwen2.5-14B-Instruct (bf16)** — *prior complete run*
 
@@ -186,7 +203,7 @@ RunPod H100 SXM (80 GB HBM3), workload 4k input × 1k output × 50 prompts, chun
 
 > **Note:** 32B fp8 throughput *decreases* with larger `chunked_prefill_size` on this workload, unlike 7B and 14B where larger chunks improved throughput. The sweet spot varies by model size and quantization.
 
-Raw CSVs: [`results/sglang_autotune.csv`](results/sglang_autotune.csv) (current, incomplete), [`results/sglang_autotune_metadata.json`](results/sglang_autotune_metadata.json). Prior runs: [`results/sglang_autotune_Qwen2.5-7B-bf16.csv`](results/sglang_autotune_Qwen2.5-7B-bf16.csv), [`results/sglang_autotune_Qwen2.5-14B-bf16.csv`](results/sglang_autotune_Qwen2.5-14B-bf16.csv), [`results/sglang_autotune_Qwen2.5-32B-fp8.csv`](results/sglang_autotune_Qwen2.5-32B-fp8.csv), [`results/all_runs.csv`](results/all_runs.csv).
+Raw CSVs: [`results/sglang_autotune.csv`](results/sglang_autotune.csv) (current, 19/20 rows), [`results/sglang_autotune_metadata.json`](results/sglang_autotune_metadata.json). Prior runs: [`results/sglang_autotune_Qwen2.5-7B-bf16.csv`](results/sglang_autotune_Qwen2.5-7B-bf16.csv), [`results/sglang_autotune_Qwen2.5-14B-bf16.csv`](results/sglang_autotune_Qwen2.5-14B-bf16.csv), [`results/sglang_autotune_Qwen2.5-32B-fp8.csv`](results/sglang_autotune_Qwen2.5-32B-fp8.csv), [`results/all_runs.csv`](results/all_runs.csv).
 
 ## Troubleshooting
 
