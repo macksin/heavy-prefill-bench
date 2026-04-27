@@ -40,9 +40,9 @@ model: microsoft/Phi-4-mini-instruct
 workload:
   input_len: 4000
   output_len: 1000
-  num_prompts: 50
 
 sweep:
+  num_prompts: [50, 100, 200, 400]
   chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768]
 
 sglang_args:
@@ -63,10 +63,12 @@ hardware:
 output_dir: results
 ```
 
-The optimizer runs `python -m sglang.bench_offline_throughput` for each `chunked_prefill_size` in the sweep list, parses the JSONL output, and picks the best.
+The optimizer runs `python -m sglang.bench_offline_throughput` for each `(num_prompts, chunked_prefill_size)` combination, parses the JSONL output, and picks the best. The sweep stops early when a chunk size OOMs (larger chunks will also OOM) or when throughput plateaus across num_prompts levels (GPU is saturated).
 
 | Field | Meaning |
 |---|---|
+| `sweep.num_prompts` | `[50, 100, 200, 400]` = sweep batch sizes to find GPU saturation point. The sweep stops early when throughput plateaus (<2% gain) or all chunk sizes OOM. Cannot be used together with `workload.num_prompts`. |
+| `workload.num_prompts` | Fixed batch size (single value). Cannot be used together with `sweep.num_prompts`. |
 | `random_range_ratio` | `0.0` = all prompts exactly `input_len`. `1.0` = uniform 0–2× input_len. Use `0.0` for deterministic batch jobs. |
 | `quantization` | `null` = bf16 on Ampere/Ada+ GPUs, fp16 on older ones. Other options: `fp8`, `awq`, `gptq`. Only applied if non-null. |
 | `gpu_hourly_cost_usd` | **Required.** Used to compute `tokens_per_dollar`. |
@@ -93,10 +95,10 @@ One CSV at `results/sglang_autotune.csv` with sweep-level schema:
 framework, gpu, quantization, chunked_prefill_size, num_prompts, input_len, output_len,
 requests_per_sec, input_tokens_per_sec, output_tokens_per_sec,
 total_tokens_per_sec, requests_per_hour, successful_requests,
-total_output_tokens, model, tp, gpu_hourly_cost_usd, tokens_per_dollar
+total_output_tokens, model, tp, gpu_hourly_cost_usd, tokens_per_dollar, oom
 ```
 
-Plus `results/sglang_autotune_metadata.json` with run configuration and explicit pricing provenance (`provider_name`, `instance_type`, `region`, `pricing_timestamp_utc`, `pricing_source_note`), and per-config JSONL files at `results/sglang_chunk{size}.jsonl`.
+Plus `results/sglang_autotune_metadata.json` with run configuration and explicit pricing provenance (`provider_name`, `instance_type`, `region`, `pricing_timestamp_utc`, `pricing_source_note`), and per-config JSONL files at `results/sglang_p{num_prompts}_chunk{chunk_size}.jsonl`.
 
 After each run, the tool warns if the output directory contains metadata files with mixed pricing provenance. Treat that warning as a blocker for direct tokens-per-dollar comparisons.
 
@@ -121,6 +123,8 @@ If any differ, do **not** rank by `tokens_per_dollar` across those rows. You may
 | Output token throughput | `output_tokens/sec` — decode throughput |
 | Total token throughput | `total_tokens/sec` — input + output |
 | Tokens per dollar | `total_tokens/sec × 3600 / gpu_hourly_cost_usd` — cost-normalized throughput for GPU selection |
+
+> **Note:** Configurations that OOM or fail appear in the CSV with throughput fields empty and `oom: True`. These rows are excluded from best-config selection but preserved so you can see where each GPU saturates.
 
 ## Example Results
 

@@ -1,7 +1,9 @@
 """SGLang bench_offline_throughput sweep driver.
 
-Runs sglang.bench_offline_throughput for each chunked_prefill_size in the sweep list,
-parses the JSONL output, and finds the configuration with maximum throughput.
+Sweeps num_prompts × chunked_prefill_size, with early stopping:
+- Inner loop (chunk_size): breaks on first OOM (larger chunks use more peak VRAM).
+- Outer loop (num_prompts): stops when throughput plateaus (<2% gain) or all
+  chunk sizes OOM (batch doesn't fit in KV cache).
 """
 
 import json
@@ -9,6 +11,8 @@ import os
 import subprocess
 import sys
 from typing import Any, Dict, List
+
+_PLATEAU_THRESHOLD = 0.02  # Stop outer loop if throughput improves less than 2%
 
 
 def _detect_gpu() -> str:
@@ -126,9 +130,41 @@ class AutoTuner:
         results: List[Dict[str, Any]] = []
         total_runs = len(self.num_prompts_values) * len(self.chunk_sizes)
         run_idx = 0
+        prev_best_tps = None
+        oom_chunk_ceiling = None  # first chunk_size that OOMed; skip >= this
         for num_prompts in self.num_prompts_values:
+            all_oom = True
+            best_tps_this_np = 0
             for chunk_size in self.chunk_sizes:
                 run_idx += 1
+
+                # Skip chunk_sizes already proven to OOM at a previous num_prompts
+                if oom_chunk_ceiling is not None and chunk_size >= oom_chunk_ceiling:
+                    print(
+                        f"\n[{run_idx}/{total_runs}] num_prompts={num_prompts}, "
+                        f"chunked_prefill_size={chunk_size}  → skipped (OOMed before)"
+                    )
+                    results.append({
+                        "chunked_prefill_size": chunk_size,
+                        "num_prompts": num_prompts,
+                        "input_len": self.input_len,
+                        "output_len": self.output_len,
+                        "requests_per_sec": "",
+                        "input_tokens_per_sec": "",
+                        "output_tokens_per_sec": "",
+                        "total_tokens_per_sec": "",
+                        "requests_per_hour": "",
+                        "successful_requests": "",
+                        "total_output_tokens": "",
+                        "model": self.model,
+                        "tp": self.tp,
+                        "framework": self.framework,
+                        "gpu": self.gpu_label,
+                        "quantization": self.quantization or "bf16",
+                        "oom": True,
+                    })
+                    continue
+
                 output_file = os.path.join(
                     self.output_dir, f"sglang_p{num_prompts}_chunk{chunk_size}.jsonl"
                 )
@@ -154,20 +190,47 @@ class AutoTuner:
                 print(f"  {' '.join(cmd)}")
                 sys.stdout.flush()
 
+                oom = False
                 try:
                     subprocess.run(cmd, check=True, timeout=7200)
                 except subprocess.CalledProcessError as exc:
                     print(f"  FAILED (exit={exc.returncode}) — likely OOM or config error")
-                    continue
+                    oom = True
                 except subprocess.TimeoutExpired:
                     print(f"  TIMEOUT — exceeded 2h")
-                    continue
+                    oom = True
 
-                parsed = _parse_jsonl(output_file)
-                if parsed is None:
+                parsed = None if oom else _parse_jsonl(output_file)
+                if not oom and parsed is None:
                     print(f"  No throughput data in output file")
-                    continue
+                    oom = True
 
+                if oom:
+                    result = {
+                        "chunked_prefill_size": chunk_size,
+                        "num_prompts": num_prompts,
+                        "input_len": self.input_len,
+                        "output_len": self.output_len,
+                        "requests_per_sec": "",
+                        "input_tokens_per_sec": "",
+                        "output_tokens_per_sec": "",
+                        "total_tokens_per_sec": "",
+                        "requests_per_hour": "",
+                        "successful_requests": "",
+                        "total_output_tokens": "",
+                        "model": self.model,
+                        "tp": self.tp,
+                        "framework": self.framework,
+                        "gpu": self.gpu_label,
+                        "quantization": self.quantization or "bf16",
+                        "oom": True,
+                    }
+                    results.append(result)
+                    oom_chunk_ceiling = chunk_size
+                    print(f"  Recorded as OOM — skipping chunk_size ≥ {chunk_size} from now on")
+                    break
+
+                all_oom = False
                 result = {
                     "chunked_prefill_size": chunk_size,
                     "num_prompts": num_prompts,
@@ -185,17 +248,35 @@ class AutoTuner:
                     "framework": self.framework,
                     "gpu": self.gpu_label,
                     "quantization": self.quantization or "bf16",
+                    "oom": False,
                 }
                 results.append(result)
 
                 print(f"  requests/sec: {result['requests_per_sec']:.3f}  "
                       f"tokens/sec: {result['total_tokens_per_sec']:.0f}  "
                       f"→ {result['requests_per_hour']:.0f} req/hr")
+                best_tps_this_np = max(best_tps_this_np, result["total_tokens_per_sec"])
 
-        if results:
-            best = max(results, key=lambda r: r["requests_per_sec"])
+            if all_oom:
+                print(f"\n[AutoTuner] Smallest chunk size OOMed at num_prompts={num_prompts}. "
+                      f"Stopping sweep — larger batches will also OOM.")
+                break
+
+            if prev_best_tps is not None and prev_best_tps > 0:
+                delta = (best_tps_this_np - prev_best_tps) / prev_best_tps
+                if delta < _PLATEAU_THRESHOLD:
+                    print(f"\n[AutoTuner] Throughput plateau at num_prompts={num_prompts} "
+                          f"({best_tps_this_np:.0f} vs {prev_best_tps:.0f} tok/s, "
+                          f"+{delta * 100:.1f}%). GPU saturated, stopping sweep.")
+                    break
+            prev_best_tps = best_tps_this_np
+
+        successful = [r for r in results if not r.get("oom")]
+        if successful:
+            best = max(successful, key=lambda r: r["requests_per_sec"])
             print(f"\n{'=' * 60}")
             print(f"[AutoTuner] BEST CONFIG:")
+            print(f"  num_prompts          = {best['num_prompts']}")
             print(f"  chunked_prefill_size = {best['chunked_prefill_size']}")
             print(f"  requests/hour        = {best['requests_per_hour']:.0f}")
             print(f"  tokens/sec           = {best['total_tokens_per_sec']:.0f}")

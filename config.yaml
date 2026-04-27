@@ -6,11 +6,11 @@ model: Qwen/Qwen2.5-7B-Instruct
 workload:
   input_len: 4000
   output_len: 1000
-  num_prompts: 50
 
 sweep:
-  # Optional outer sweep; if set, workload.num_prompts must be omitted.
-  # num_prompts: [25, 50, 100]
+  # Sweep batch sizes to find GPU saturation point.
+  # Cannot be used together with workload.num_prompts.
+  num_prompts: [50, 100, 200, 400]
   chunked_prefill_sizes: [2048, 4096, 8192, 16384, 32768]
 
 sglang_args:

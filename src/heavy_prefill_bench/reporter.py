@@ -2,6 +2,7 @@
 import csv
 import json
 import os
+import sys
 from typing import Any, Dict, List
 
 
@@ -24,6 +25,7 @@ SWEEP_FIELDNAMES = [
     "tp",
     "gpu_hourly_cost_usd",
     "tokens_per_dollar",
+    "oom",
 ]
 
 
@@ -83,8 +85,8 @@ def warn_if_mixed_pricing_metadata(output_dir: str) -> None:
     if len(signatures) <= 1:
         return
 
-    print("\n[WARNING] Mixed pricing metadata detected across run metadata files.")
-    print("Comparing or merging CSVs with different pricing provenance can make tokens_per_dollar misleading.")
+    print("\n[WARNING] Mixed pricing metadata detected across run metadata files.", file=sys.stderr)
+    print("Comparing or merging CSVs with different pricing provenance can make tokens_per_dollar misleading.", file=sys.stderr)
     for idx, (signature, names) in enumerate(signatures.items(), start=1):
-        print(f"  Set {idx}: {', '.join(sorted(names))}")
-        print(f"    pricing={signature}")
+        print(f"  Set {idx}: {', '.join(sorted(names))}", file=sys.stderr)
+        print(f"    pricing={signature}", file=sys.stderr)
